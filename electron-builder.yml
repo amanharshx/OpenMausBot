@@ -1,4 +1,4 @@
-appId: com.openmausbot.app
+appId: com.amanharshx.openmausbot
 productName: OpenMausBot
 artifactName: OpenMausBot-${version}-${arch}.${ext}
 
@@ -15,7 +15,7 @@ protocols:
 # stranded on its installed version.
 publish:
   - provider: github
-    owner: milind-soni
+    owner: amanharshx
     repo: OpenMausBot
 
 directories:
