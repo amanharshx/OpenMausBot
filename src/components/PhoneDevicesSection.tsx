@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState, type ReactNode } from "react";
+import { useCallback, useEffect, useRef, useState, type ReactNode } from "react";
 import { t } from "@/lib/i18n";
 import { SettingsSkeletonCard } from "./settings/SettingsStates";
 import { cn } from "@/lib/cn";
@@ -17,6 +17,7 @@ import {
   usePhoneSetupController,
 } from "./PhoneSetupFlow";
 import { companionPairingMode } from "../lib/phone-setup";
+import { companionPairingRoute } from "../lib/companion-pairing";
 import { revealPhonePairing, takePairOnOpen } from "../lib/phone-pairing";
 import { showTunnelRetiredNotice } from "../lib/phone-link";
 import { PhonesList } from "./PhonesList";
@@ -262,10 +263,6 @@ export function PairDeviceDialog({ c, state, onClose, secureAddress = false, pla
   const [picked, setPicked] = useState<PairRoute>(signedIn && relayAvailable ? "relay" : "wifi");
   const anyOn = (["wifi", "relay"] as const).some((route) => state.routes?.[route]?.on) || state.routes?.tailscale?.on === true;
   const [step, setStep] = useState<PairStep>(anyOn || secureAddress ? "pairing" : "consent");
-  const { start } = c;
-  useEffect(() => {
-    if (secureAddress) start();
-  }, [secureAddress, start]);
   // Back from the sign-in: with it, Anywhere is chosen; cancelled, the same screen as before.
   useEffect(() => {
     if (step !== "sign-in") return;
@@ -391,13 +388,26 @@ export function PhoneDevicesSection({ profileEmail = "", focusRequest = 0, simpl
   // Both modes start the same way: nothing paired and no way on reads as one closed row; Advanced only adds depth inside.
   const [showRoutes, setShowRoutes] = useState(false);
   const [moreOpenAsked, setMoreOpen] = useState<boolean | null>(null);
+  const managedPolicy = useStore().state.config?.managedPolicy;
+  const remoteBlocked = managedPolicy?.remoteAccess === false ? t("policy.remoteBlocked", { organization: managedPolicy.organizationName }) : null;
+  const managedBy = managedPolicy?.remoteAccess === false ? t("policy.managedBy", { organization: managedPolicy.organizationName }) : null;
+  const { start, useLocal, useTailscale } = c;
+  const openPairing = useCallback((mode: "device" | "https") => {
+    if (remoteBlocked) return;
+    setPairing(mode);
+    if (mode === "https") start();
+    else if (state && (["wifi", "relay", "tailscale"] as const).some((route) => state.routes?.[route]?.on)) {
+      if (companionPairingRoute(state, "local")) useLocal();
+      else if (companionPairingRoute(state, "tailscale")) useTailscale();
+    }
+  }, [remoteBlocked, start, state, useLocal, useTailscale]);
   useEffect(() => {
     if (!focusRequest) revealed.current = 0;
-    else if (revealed.current !== focusRequest && revealPhonePairing(pairingFlow.current)) {
+    else if (loaded && revealed.current !== focusRequest && revealPhonePairing(pairingFlow.current)) {
       revealed.current = focusRequest;
-      if (takePairOnOpen()) setPairing("device");
+      if (takePairOnOpen()) openPairing("device");
     }
-  }, [focusRequest, loaded]);
+  }, [focusRequest, loaded, openPairing]);
   const resumeAsked = useRef(false);
   const resumePaused = shouldResumePausedAddress(c.account, state);
   const { accountAct } = c;
@@ -406,10 +416,6 @@ export function PhoneDevicesSection({ profileEmail = "", focusRequest = 0, simpl
     resumeAsked.current = true;
     void accountAct((remote) => remote.prepare?.() ?? remote.state());
   }, [resumePaused, accountAct]);
-  const managedPolicy = useStore().state.config?.managedPolicy;
-  const remoteBlocked = managedPolicy?.remoteAccess === false ? t("policy.remoteBlocked", { organization: managedPolicy.organizationName }) : null;
-  const managedBy = managedPolicy?.remoteAccess === false ? t("policy.managedBy", { organization: managedPolicy.organizationName }) : null;
-
   if (!companionBridge()) return null;
 
   if (!state) {
@@ -433,10 +439,10 @@ export function PhoneDevicesSection({ profileEmail = "", focusRequest = 0, simpl
   const reachOpen = showRoutes || pairedCount > 0 || anyRoute;
   const moreWays = !simple || tailscaleOn || httpsOn;
   const moreOpen = moreOpenAsked ?? (tailscaleOn || httpsOn);
-  const pairAgain = c.busy || remoteBlocked ? undefined : () => setPairing("device");
+  const pairAgain = c.busy || remoteBlocked ? undefined : () => openPairing("device");
   const pairButton = (
     <button type="button" aria-disabled={c.busy || Boolean(remoteBlocked) || undefined} disabled={c.busy} title={managedBy ?? undefined}
-      onClick={() => { if (!remoteBlocked) setPairing("device"); }}
+      onClick={() => { if (!remoteBlocked) openPairing("device"); }}
       className={cn("ui-button ui-button-primary", remoteBlocked && "opacity-40")} data-pair-device="" data-phone-pairing-action="" data-settings-drop="">
       {t("phone.pair.button")}
     </button>
@@ -503,7 +509,7 @@ export function PhoneDevicesSection({ profileEmail = "", focusRequest = 0, simpl
                     {httpsOn ? (
                       <button type="button" className="ui-button" disabled={c.busy} onClick={() => void c.act((companion) => setRoute(companion, "https", false))}>{t("devices.route.turnOff")}</button>
                     ) : (
-                      <button type="button" className="ui-button" disabled={c.busy || c.accountBusy || Boolean(managedBy)} onClick={() => setPairing("https")}>{t("devices.route.setUp")}</button>
+                      <button type="button" className="ui-button" disabled={c.busy || c.accountBusy || Boolean(managedBy)} onClick={() => openPairing("https")}>{t("devices.route.setUp")}</button>
                     )}
                   </span>
                 </SettingRow>
